@@ -122,7 +122,7 @@ ifeq ($(strip $(STOP_DEPENDENCY_CHECK)),false)
 define DEP_CHECK
 	(echo -n "Checking dependency for $2 ..."; \
 	if [ -e "$1" ]; then \
-		LAST_HASH="`cat $1`"; \
+		LAST_HASH="$$(cat $1)"; \
 		CUR_HASH=$$($(call DEP_HASH,$2)); \
 		if [ "$$LAST_HASH" = "$$CUR_HASH" ]; then \
 			echo " (skip)"; \
@@ -238,10 +238,11 @@ config-galaxy-s2: config-gecko adb-check-version
 	echo OK
 
 .PHONY: config-maguro
-config-maguro: config-gecko
+config-maguro: config-gecko adb-check-version
 	@echo "KERNEL = msm" > .config.mk && \
         echo "KERNEL_PATH = ./boot/msm" >> .config.mk && \
 	echo "GONK = maguro" >> .config.mk && \
+	export PATH=$$PATH:$$(dirname $(ADB)) && \
 	cd $(GONK_PATH)/device/toro/maguro && \
 	echo Extracting binary blobs from device, which should be plugged in! ... && \
 	./extract-files.sh && \
@@ -366,7 +367,7 @@ gecko-install-hack: gecko
 	mkdir -p $(OUT_DIR)/lib
 	# Extract the newest tarball in the gecko objdir.
 	( cd $(OUT_DIR) && \
-	  tar xvfz `ls -t $(GECKO_OBJDIR)/dist/b2g-*.tar.gz | head -n1` )
+	  tar xvfz $$(ls -t $(GECKO_OBJDIR)/dist/b2g-*.tar.gz | head -n1) )
 	find $(GONK_PATH)/out -iname "*.img" | xargs rm -f
 	@$(call GONK_CMD,make $(MAKE_FLAGS) $(GONK_MAKE_FLAGS) systemimage-nodeps)
 
@@ -387,18 +388,18 @@ install-gecko: gecko-install-hack adb-check-version
 # The sad hacks keep piling up...  We can't set this up to be
 # installed as part of the data partition because we can't flash that
 # on the sgs2.
-PROFILE := `$(ADB) shell ls -d /data/b2g/mozilla/*.default | tr -d '\r'`
+PROFILE := $$($(ADB) shell ls -d /data/b2g/mozilla/*.default | tr -d '\r')
 PROFILE_DATA := gaia/profile
 .PHONY: install-gaia
 install-gaia: adb-check-version
-	@for file in `ls $(PROFILE_DATA)`; \
+	@for file in $$(ls $(PROFILE_DATA)); \
 	do \
 		data=$${file##*/}; \
 		echo Copying $$data; \
 		$(ADB) shell rm -r $(PROFILE)/$$data; \
 		$(ADB) push gaia/profile/$$data $(PROFILE)/$$data; \
 	done
-	@for i in `ls gaia`; do $(ADB) push gaia/$$i /data/local/$$i; done
+	@for i in $$(ls gaia); do $(ADB) push gaia/$$i /data/local/$$i; done
 
 .PHONY: image
 image: build
