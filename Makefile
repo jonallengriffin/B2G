@@ -146,6 +146,9 @@ endif # STOP_DEPENDENCY_CHECK
 CCACHE ?= $(shell which ccache)
 ADB := $(abspath glue/gonk/out/host/linux-x86/bin/adb)
 
+B2G_PID=$(shell adb shell pidof b2g)
+GDBSERVER_PID=$(shell adb shell pidof gdbserver)
+
 .PHONY: build
 build: gecko-install-hack
 	$(MAKE) gonk
@@ -156,6 +159,7 @@ endif
 
 KERNEL_DIR = boot/kernel-android-$(KERNEL)
 GECKO_OBJDIR = $(GECKO_PATH)/objdir-prof-gonk
+GONK_OBJDIR=$(abspath ./glue/gonk/out/target/product/$(GONK))
 
 define GECKO_BUILD_CMD
 	export MAKE_FLAGS=$(MAKE_FLAGS) && \
@@ -439,8 +443,9 @@ unlock-bootloader: adb-check-version
 
 # Kill the b2g process on the device.
 .PHONY: kill-b2g
+.SECONDEXPANSION:
 kill-b2g: adb-check-version
-	$(ADB) shell killall b2g
+	$(ADB) shell kill $(B2G_PID)
 
 .PHONY: sync
 sync:
@@ -463,6 +468,55 @@ package:
 	cp -R gaia/tests $(PKG_DIR)/gaia
 	cd $(PKG_DIR) && tar -czvf qemu_package.tar.gz qemu gaia
 
+#
+# Package up everything needed to build mozilla-central with
+# --enable-application=b2g outside of a b2g git clone.
+#
+
+# A linux host is needed (well, it's easiest) to build *Gonk* and
+# hence the libraries needed by the toolchain, but once built, the
+# toolchain itself can be packaged for multiple targets.
+TOOLCHAIN_TARGET ?= linux-x86
+
+# List of all dirs that gecko depends on.  These are relative to
+# GONK_PATH.
+#
+# NB: keep this in sync with gecko/configure.in.
+#
+# XXX: why do we -Ibionic?  There's some dep in there that's not
+# exposed through a more specific -I.  Not loading all of bionic
+# results in a build error :|.
+TOOLCHAIN_DIRS = \
+	bionic \
+	external/stlport/stlport \
+	frameworks/base/include \
+	frameworks/base/native/include \
+	frameworks/base/opengl/include \
+	frameworks/base/services/sensorservice \
+	hardware/libhardware/include \
+	hardware/libhardware_legacy/include \
+	ndk/sources/cxx-stl/system/include \
+	ndk/sources/cxx-stl/stlport/stlport \
+	out/target/product/$(GONK)/obj/lib \
+	prebuilt/ndk/android-ndk-r4/platforms/android-8/arch-arm \
+	prebuilt/$(TOOLCHAIN_TARGET)/toolchain/arm-eabi-4.4.3 \
+	system/core/include
+
+# Toolchain versions are numbered consecutively.
+TOOLCHAIN_VERSION := 0
+TOOLCHAIN_PKG_DIR := gonk-toolchain-$(TOOLCHAIN_VERSION)
+.PHONY: package-toolchain
+package-toolchain: gonk
+	@rm -rf $(TOOLCHAIN_PKG_DIR); \
+	mkdir $(TOOLCHAIN_PKG_DIR); \
+	git rev-parse HEAD > $(TOOLCHAIN_PKG_DIR)/b2g-commit-sha1.txt; \
+	$(foreach d,$(TOOLCHAIN_DIRS),\
+	  mkdir -p $(TOOLCHAIN_PKG_DIR)/$(d); \
+	  cp -r $(GONK_PATH)/$(d)/* $(TOOLCHAIN_PKG_DIR)/$(d); \
+	) \
+	tar -cjvf $(TOOLCHAIN_PKG_DIR).tar.bz2 $(TOOLCHAIN_PKG_DIR); \
+	rm -rf $(TOOLCHAIN_PKG_DIR)
+
 $(ADB):
 	@$(call GONK_CMD,$(MAKE) adb)
 
@@ -484,3 +538,57 @@ adb-check-version: $(ADB)
 test:
 	cd marionette/marionette && \
 	sh venv_test.sh `which python` --emulator --homedir=$(abspath .) --type=b2g $(TEST_DIRS)
+
+GDB_PORT=22576
+GDBINIT=/tmp/gdbinit
+GDB=$(abspath glue/gonk/prebuilt/linux-x86/tegra-gdb/arm-eabi-gdb)
+B2G_BIN=/system/b2g/b2g
+
+.PHONY: forward-gdb-port
+forward-gdb-port: adb-check-version
+	$(ADB) forward tcp:$(GDB_PORT) tcp:$(GDB_PORT)
+
+.PHONY: kill-gdb-server
+.SECONDEXPANSION:
+kill-gdb-server:
+	if [ -n "$(GDBSERVER_PID)" ]; then $(ADB) shell kill $(GDBSERVER_PID); fi
+
+.PHONY: attach-gdb-server
+.SECONDEXPANSION:
+attach-gdb-server: adb-check-version forward-gdb-port kill-gdb-server
+	$(ADB) shell gdbserver :$(GDB_PORT) --attach $(B2G_PID) &
+	sleep 1
+
+.PHONY: gdb-init-file
+.SECONDEXPANSION:
+SYMDIR=$(GONK_OBJDIR)/symbols
+gdb-init-file:
+	echo "set solib-absolute-prefix $(SYMDIR)" > $(GDBINIT)
+	echo "set solib-search-path $(GECKO_OBJDIR)/dist/bin:$(GECKO_OBJDIR)/dist/lib:$(SYMDIR)/system/lib:$(SYMDIR)/system/lib/hw:$(SYMDIR)/system/lib/egl:$(SYMDIR)/system/lib:$(SYMDIR)/system/lib/hw:$(SYMDIR)/system/lib/egl" >> $(GDBINIT)
+	echo "target remote :$(GDB_PORT)" >> $(GDBINIT)
+
+.PHONY: attach-gdb
+.SECONDEXPANSION:
+attach-gdb: attach-gdb-server gdb-init-file
+	$(GDB) -x $(GDBINIT) $(GECKO_OBJDIR)/dist/bin/b2g
+
+.PHONY: disable-auto-restart
+disable-auto-restart: adb-check-version kill-b2g
+	$(ADB) remount
+	$(ADB) shell mv $(B2G_BIN) $(B2G_BIN).d
+
+.PHONY: restore-auto-restart
+restore-auto-restart: adb-check-version
+	$(ADB) remount
+	$(ADB) shell mv $(B2G_BIN).d $(B2G_BIN)
+
+.PHONY: run-gdb-server
+.SECONDEXPANSION:
+run-gdb-server: adb-check-version forward-gdb-port kill-gdb-server disable-auto-restart
+	$(ADB) shell gdbserver :$(GDB_PORT) $(B2G_BIN).d &
+	sleep 1
+
+.PHONY: run-gdb
+.SECONDEXPANSION:
+run-gdb: run-gdb-server gdb-init-file
+	$(GDB) -x $(GDBINIT) $(GECKO_OBJDIR)/dist/bin/b2g
