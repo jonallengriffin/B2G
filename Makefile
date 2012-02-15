@@ -14,9 +14,11 @@ HEIMDALL ?= heimdall
 TOOLCHAIN_HOST = linux-x86
 TOOLCHAIN_PATH = ./glue/gonk/prebuilt/$(TOOLCHAIN_HOST)/toolchain/arm-eabi-4.4.3/bin
 
+GAIA_PATH ?= $(abspath gaia)
+GECKO_PATH ?= $(abspath gecko)
 GONK_PATH = $(abspath glue/gonk)
 
-TEST_DIRS = $(abspath gaia/tests) $(abspath marionette/marionette/tests/unit-tests.ini)
+TEST_DIRS = $(abspath $(GAIA_PATH)/tests) $(abspath marionette/marionette/tests/unit-tests.ini)
 
 # We need adb for config-* targets.  Adb is built by building system
 # of gonk that needs a correct product name provided by "GONK_TARGET".
@@ -42,8 +44,6 @@ define GONK_CMD # $(call GONK_CMD,cmd)
 	export PATH=$$PATH:$(FAKE_JDK_PATH) && \
 	$(1)
 endef
-
-GECKO_PATH ?= $(abspath gecko)
 
 ANDROID_SDK_PLATFORM ?= android-13
 GECKO_CONFIGURE_ARGS ?=
@@ -146,8 +146,8 @@ endif # STOP_DEPENDENCY_CHECK
 CCACHE ?= $(shell which ccache)
 ADB := $(abspath glue/gonk/out/host/linux-x86/bin/adb)
 
-B2G_PID=$(shell adb shell pidof b2g)
-GDBSERVER_PID=$(shell adb shell pidof gdbserver)
+B2G_PID=$(shell $(ADB) shell pidof b2g)
+GDBSERVER_PID=$(shell $(ADB) shell pidof gdbserver)
 
 .PHONY: build
 build: gecko-install-hack
@@ -359,7 +359,7 @@ flash-only-akami: flash-only-toro
 .PHONY: flash-only-toro
 flash-only-toro:
 	@$(call GONK_CMD, \
-	adb reboot bootloader && \
+	$(ADB) reboot bootloader && \
 	$(FASTBOOT) devices && \
 	$(FASTBOOT) erase userdata && \
 	$(FASTBOOT) flash userdata ./out/target/product/$(GONK)/userdata.img && \
@@ -402,10 +402,10 @@ gecko-install-hack: gecko
 gaia-hack: gaia
 	rm -rf $(OUT_DIR)/home
 	mkdir -p $(OUT_DIR)/home
-	cp -r gaia/* $(OUT_DIR)/home
+	cp -r $(GAIA_PATH)/* $(OUT_DIR)/home
 	rm -rf $(OUT_DIR)/b2g/defaults/profile
 	mkdir -p $(OUT_DIR)/b2g/defaults
-	cp -r gaia/profile $(OUT_DIR)/b2g/defaults
+	cp -r $(GAIA_PATH)/profile $(OUT_DIR)/b2g/defaults
 
 .PHONY: install-gecko
 install-gecko: gecko-install-hack adb-check-version
@@ -421,7 +421,7 @@ install-gecko-only:
 # installed as part of the data partition because we can't flash that
 # on the sgs2.
 PROFILE := $$($(ADB) shell ls -d /data/b2g/mozilla/*.default | tr -d '\r')
-PROFILE_DATA := gaia/profile
+PROFILE_DATA := $(GAIA_PATH)/profile
 .PHONY: install-gaia
 install-gaia: adb-check-version
 	@for file in $$(ls $(PROFILE_DATA)); \
@@ -429,9 +429,9 @@ install-gaia: adb-check-version
 		data=$${file##*/}; \
 		echo Copying $$data; \
 		$(ADB) shell rm -r $(PROFILE)/$$data; \
-		$(ADB) push gaia/profile/$$data $(PROFILE)/$$data; \
+		$(ADB) push $(GAIA_PATH)/profile/$$data $(PROFILE)/$$data; \
 	done
-	@for i in $$(ls gaia); do $(ADB) push gaia/$$i /data/local/$$i; done
+	@for i in $$(ls $(GAIA_PATH)); do $(ADB) push $(GAIA_PATH)/$$i /data/local/$$i; done
 
 .PHONY: image
 image: build
@@ -459,14 +459,14 @@ PKG_DIR := package
 package:
 	rm -rf $(PKG_DIR)
 	mkdir -p $(PKG_DIR)/qemu/bin
-	mkdir -p $(PKG_DIR)/gaia
+	mkdir -p $(PKG_DIR)/$(GAIA_PATH)
 	cp $(GONK_PATH)/out/host/linux-x86/bin/emulator $(PKG_DIR)/qemu/bin
 	cp $(GONK_PATH)/out/host/linux-x86/bin/emulator-arm $(PKG_DIR)/qemu/bin
 	cp $(GONK_PATH)/out/host/linux-x86/bin/adb $(PKG_DIR)/qemu/bin
 	cp boot/kernel-android-qemu/arch/arm/boot/zImage $(PKG_DIR)/qemu
 	cp -R $(GONK_PATH)/out/target/product/generic $(PKG_DIR)/qemu
-	cp -R gaia/tests $(PKG_DIR)/gaia
-	cd $(PKG_DIR) && tar -czvf qemu_package.tar.gz qemu gaia
+	cp -R $(GAIA_PATH)/tests $(PKG_DIR)/$(GAIA_PATH)
+	cd $(PKG_DIR) && tar -czvf qemu_package.tar.gz qemu $(GAIA_PATH)
 
 #
 # Package up everything needed to build mozilla-central with
@@ -540,7 +540,7 @@ test:
 	sh venv_test.sh `which python` --emulator --homedir=$(abspath .) --type=b2g $(TEST_DIRS)
 
 GDB_PORT=22576
-GDBINIT=/tmp/gdbinit
+GDBINIT=/tmp/b2g.gdbinit.$(shell whoami)
 GDB=$(abspath glue/gonk/prebuilt/linux-x86/tegra-gdb/arm-eabi-gdb)
 B2G_BIN=/system/b2g/b2g
 
@@ -549,26 +549,22 @@ forward-gdb-port: adb-check-version
 	$(ADB) forward tcp:$(GDB_PORT) tcp:$(GDB_PORT)
 
 .PHONY: kill-gdb-server
-.SECONDEXPANSION:
 kill-gdb-server:
 	if [ -n "$(GDBSERVER_PID)" ]; then $(ADB) shell kill $(GDBSERVER_PID); fi
 
 .PHONY: attach-gdb-server
-.SECONDEXPANSION:
 attach-gdb-server: adb-check-version forward-gdb-port kill-gdb-server
 	$(ADB) shell gdbserver :$(GDB_PORT) --attach $(B2G_PID) &
 	sleep 1
 
 .PHONY: gdb-init-file
-.SECONDEXPANSION:
 SYMDIR=$(GONK_OBJDIR)/symbols
 gdb-init-file:
 	echo "set solib-absolute-prefix $(SYMDIR)" > $(GDBINIT)
-	echo "set solib-search-path $(GECKO_OBJDIR)/dist/bin:$(GECKO_OBJDIR)/dist/lib:$(SYMDIR)/system/lib:$(SYMDIR)/system/lib/hw:$(SYMDIR)/system/lib/egl:$(SYMDIR)/system/lib:$(SYMDIR)/system/lib/hw:$(SYMDIR)/system/lib/egl" >> $(GDBINIT)
+	echo "set solib-search-path $(GECKO_OBJDIR)/dist/bin:$(GECKO_OBJDIR)/dist/lib:$(SYMDIR)/system/lib:$(SYMDIR)/system/lib/hw:$(SYMDIR)/system/lib/egl:$(and $(ANDROIDFS_DIR),$(ANDROIDFS_DIR)/symbols/system/lib:$(ANDROIDFS_DIR)/symbols/system/lib/hw:$(ANDROIDFS_DIR)/symbols/system/lib/egl)" >> $(GDBINIT)
 	echo "target remote :$(GDB_PORT)" >> $(GDBINIT)
 
 .PHONY: attach-gdb
-.SECONDEXPANSION:
 attach-gdb: attach-gdb-server gdb-init-file
 	$(GDB) -x $(GDBINIT) $(GECKO_OBJDIR)/dist/bin/b2g
 
@@ -583,12 +579,10 @@ restore-auto-restart: adb-check-version
 	$(ADB) shell mv $(B2G_BIN).d $(B2G_BIN)
 
 .PHONY: run-gdb-server
-.SECONDEXPANSION:
 run-gdb-server: adb-check-version forward-gdb-port kill-gdb-server disable-auto-restart
 	$(ADB) shell gdbserver :$(GDB_PORT) $(B2G_BIN).d &
 	sleep 1
 
 .PHONY: run-gdb
-.SECONDEXPANSION:
 run-gdb: run-gdb-server gdb-init-file
 	$(GDB) -x $(GDBINIT) $(GECKO_OBJDIR)/dist/bin/b2g
