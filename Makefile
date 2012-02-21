@@ -146,8 +146,8 @@ endif # STOP_DEPENDENCY_CHECK
 CCACHE ?= $(shell which ccache)
 ADB := $(abspath glue/gonk/out/host/linux-x86/bin/adb)
 
-B2G_PID=$(shell $(ADB) shell pidof b2g)
-GDBSERVER_PID=$(shell $(ADB) shell pidof gdbserver)
+B2G_PID=$(shell adb shell toolbox ps | grep "b2g" | awk '{ print $$2; }')
+GDBSERVER_PID=$(shell adb shell toolbox ps | grep "gdbserver" | awk '{ print $$2; }')
 
 .PHONY: build
 build: gecko-install-hack
@@ -255,8 +255,14 @@ config-maguro: config-gecko adb-check-version
 	./extract-files.sh && \
 	echo OK
 
+# Hack!  Upstream boot/msm is RO at the moment and forking isn't
+# a nice alternative at the moment...
+.patches.applied:
+	cd boot/msm && git apply $(abspath glue/patch)/yaffs_vfs.patch
+	touch $@
+
 .PHONY: config-akami
-config-akami: config-gecko
+config-akami: .patches.applied config-gecko
 	@echo "KERNEL = msm" > .config.mk && \
         echo "KERNEL_PATH = ./boot/msm" >> .config.mk && \
 	echo "GONK = akami" >> .config.mk && \
