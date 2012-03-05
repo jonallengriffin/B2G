@@ -235,8 +235,17 @@ mrproper:
 	$(GIT) reset --hard && \
 	$(GIT) clean -d -f -x
 
+VENDOR_DIR=$(GONK_PATH)/vendor
+APNS_CONF=$(VENDOR_DIR)/apns-conf.xml
+
+$(VENDOR_DIR):
+	mkdir -p $(VENDOR_DIR)
+
+$(APNS_CONF): $(VENDOR_DIR)
+	wget -O $(APNS_CONF) https://raw.github.com/CyanogenMod/android_vendor_cyanogen/gingerbread/prebuilt/common/etc/apns-conf.xml
+
 .PHONY: config-galaxy-s2
-config-galaxy-s2: config-gecko adb-check-version
+config-galaxy-s2: config-gecko adb-check-version $(APNS_CONF)
 	@echo "KERNEL = galaxy-s2" > .config.mk && \
         echo "KERNEL_PATH = ./boot/kernel-android-galaxy-s2" >> .config.mk && \
 	echo "GONK = galaxys2" >> .config.mk && \
@@ -248,7 +257,7 @@ config-galaxy-s2: config-gecko adb-check-version
 	echo OK
 
 .PHONY: config-maguro
-config-maguro: config-gecko adb-check-version
+config-maguro: config-gecko adb-check-version $(APNS_CONF)
 	@echo "KERNEL = msm" > .config.mk && \
         echo "KERNEL_PATH = ./boot/msm" >> .config.mk && \
 	echo "GONK = maguro" >> .config.mk && \
@@ -265,7 +274,7 @@ config-maguro: config-gecko adb-check-version
 	touch $@
 
 .PHONY: config-akami
-config-akami: .patches.applied config-gecko
+config-akami: .patches.applied config-gecko $(APNS_CONF)
 	@echo "KERNEL = msm" > .config.mk && \
         echo "KERNEL_PATH = ./boot/msm" >> .config.mk && \
 	echo "GONK = akami" >> .config.mk && \
@@ -278,33 +287,61 @@ config-akami: .patches.applied config-gecko
 config-gecko:
 	@ln -sf $(PWD)/config/gecko-prof-gonk $(GECKO_PATH)/mozconfig
 
+DOWNLOAD_PATH=$(GONK_PATH)/download
+
 %.tgz:
-	wget https://dl.google.com/dl/android/aosp/$@
+	mkdir -p $(DOWNLOAD_PATH)
+	cd $(DOWNLOAD_PATH) && wget https://dl.google.com/dl/android/aosp/$(notdir $@)
 
 NEXUS_S_BUILD = grj90
-extract-broadcom-crespo4g.sh: broadcom-crespo4g-$(NEXUS_S_BUILD)-c4ec9a38.tgz
-	tar zxvf $< && ./$@
-extract-imgtec-crespo4g.sh: imgtec-crespo4g-$(NEXUS_S_BUILD)-a8e2ce86.tgz
-	tar zxvf $< && ./$@
-extract-nxp-crespo4g.sh: nxp-crespo4g-$(NEXUS_S_BUILD)-9abcae18.tgz
-	tar zxvf $< && ./$@
-extract-samsung-crespo4g.sh: samsung-crespo4g-$(NEXUS_S_BUILD)-9474e48f.tgz
-	tar zxvf $< && ./$@
+
+$(DOWNLOAD_PATH)/extract-broadcom-crespo4g.sh: $(DOWNLOAD_PATH)/broadcom-crespo4g-$(NEXUS_S_BUILD)-c4ec9a38.tgz
+	cd $(DOWNLOAD_PATH) && tar zxvf $< && cd $(GONK_PATH) && $@
+
+$(DOWNLOAD_PATH)/extract-imgtec-crespo4g.sh: $(DOWNLOAD_PATH)/imgtec-crespo4g-$(NEXUS_S_BUILD)-a8e2ce86.tgz
+	cd $(DOWNLOAD_PATH) && tar zxvf $< && cd $(GONK_PATH) && $@
+
+$(DOWNLOAD_PATH)/extract-nxp-crespo4g.sh: $(DOWNLOAD_PATH)/nxp-crespo4g-$(NEXUS_S_BUILD)-9abcae18.tgz
+	cd $(DOWNLOAD_PATH) && tar zxvf $< && cd $(GONK_PATH) && $@
+
+$(DOWNLOAD_PATH)/extract-samsung-crespo4g.sh: $(DOWNLOAD_PATH)/samsung-crespo4g-$(NEXUS_S_BUILD)-9474e48f.tgz
+	cd $(DOWNLOAD_PATH) && tar zxvf $< && cd $(GONK_PATH) && $@
+
+$(DOWNLOAD_PATH)/extract-broadcom-crespo.sh: $(DOWNLOAD_PATH)/broadcom-crespo-$(NEXUS_S_BUILD)-fb8eed0c.tgz
+	cd $(DOWNLOAD_PATH) && tar zxvf $< && cd $(GONK_PATH) && $@
+
+$(DOWNLOAD_PATH)/extract-imgtec-crespo.sh: $(DOWNLOAD_PATH)/imgtec-crespo-$(NEXUS_S_BUILD)-f03db3d1.tgz
+	cd $(DOWNLOAD_PATH) && tar zxvf $< && cd $(GONK_PATH) && $@ && rm -rf $(GONK_PATH)/vendor/imgtec/crespo/overlay
+
+$(DOWNLOAD_PATH)/extract-nxp-crespo.sh: $(DOWNLOAD_PATH)/nxp-crespo-$(NEXUS_S_BUILD)-bcb793da.tgz
+	cd $(DOWNLOAD_PATH) && tar zxvf $< && cd $(GONK_PATH) && $@
+
+$(DOWNLOAD_PATH)/extract-samsung-crespo.sh: $(DOWNLOAD_PATH)/samsung-crespo-$(NEXUS_S_BUILD)-c6e00e6a.tgz
+	cd $(DOWNLOAD_PATH) && tar zxvf $< && cd $(GONK_PATH) && $@
 
 .PHONY: blobs-nexuss4g
-blobs-nexuss4g: extract-broadcom-crespo4g.sh extract-imgtec-crespo4g.sh extract-nxp-crespo4g.sh extract-samsung-crespo4g.sh
+blobs-nexuss4g: $(DOWNLOAD_PATH)/extract-broadcom-crespo4g.sh $(DOWNLOAD_PATH)/extract-imgtec-crespo4g.sh $(DOWNLOAD_PATH)/extract-nxp-crespo4g.sh $(DOWNLOAD_PATH)/extract-samsung-crespo4g.sh
+
+.PHONY: blobs-nexuss
+blobs-nexuss: $(DOWNLOAD_PATH)/extract-broadcom-crespo.sh $(DOWNLOAD_PATH)/extract-imgtec-crespo.sh $(DOWNLOAD_PATH)/extract-nxp-crespo.sh $(DOWNLOAD_PATH)/extract-samsung-crespo.sh
+	mkdir -p $(GONK_PATH)/packages/wallpapers/LivePicker
+	touch $(GONK_PATH)/packages/wallpapers/LivePicker/android.software.live_wallpaper.xml
 
 .PHONY: config-nexuss4g
-config-nexuss4g: blobs-nexuss4g config-gecko
+config-nexuss4g: blobs-nexuss4g config-gecko $(APNS_CONF)
 	@echo "KERNEL = samsung" > .config.mk && \
         echo "KERNEL_PATH = ./boot/kernel-android-samsung" >> .config.mk && \
 	echo "GONK = crespo4g" >> .config.mk && \
 	cp -p config/kernel-nexuss4g boot/kernel-android-samsung/.config && \
-	$(MAKE) -C $(CURDIR) nexuss4g-postconfig
+	echo OK
 
-.PHONY: nexuss4g-postconfig
-nexuss4g-postconfig:
-	$(call GONK_CMD,$(MAKE) signapk && vendor/samsung/crespo4g/reassemble-apks.sh)
+.PHONY: config-nexuss
+config-nexuss: blobs-nexuss config-gecko $(APNS_CONF)
+	@echo "KERNEL = samsung" > .config.mk && \
+        echo "KERNEL_PATH = ./boot/kernel-android-samsung" >> .config.mk && \
+	echo "GONK = crespo" >> .config.mk && \
+	cp -p config/kernel-nexuss4g boot/kernel-android-samsung/.config && \
+	echo OK
 
 .PHONY: config-qemu
 config-qemu: config-gecko
@@ -329,6 +366,12 @@ flash: flash-$(GONK)
 
 .PHONY: flash-only
 flash-only: flash-only-$(GONK)
+
+.PHONY: flash-crespo
+flash-crespo: flash-crespo4g
+
+.PHONY: flash-only-crespo
+flash-only-crespo: flash-only-crespo4g
 
 .PHONY: flash-crespo4g
 flash-crespo4g: image adb-check-version
