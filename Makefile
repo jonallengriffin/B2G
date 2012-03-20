@@ -16,7 +16,7 @@ GONK_BASE ?= glue/gonk
 FASTBOOT ?= $(abspath $(GONK_BASE)/out/host/linux-x86/bin/fastboot)
 HEIMDALL ?= heimdall
 TOOLCHAIN_HOST = linux-x86
-TOOLCHAIN_PATH = $(GONK_BASE)/prebuilt/$(TOOLCHAIN_HOST)/toolchain/arm-eabi-4.4.3/bin
+TOOLCHAIN_PATH ?= $(GONK_BASE)/prebuilt/$(TOOLCHAIN_HOST)/toolchain/arm-eabi-4.4.3/bin
 
 GAIA_PATH ?= $(abspath gaia)
 GECKO_PATH ?= $(abspath gecko)
@@ -183,7 +183,8 @@ define GECKO_BUILD_CMD
 	export GONK_PRODUCT="$(GONK)" && \
 	export GONK_PATH="$(GONK_PATH)" && \
 	export TARGET_TOOLS_PREFIX="$(abspath $(TOOLCHAIN_PATH))" && \
-	export EXTRA_INCLUDE="-include $(abspath Unicode.h)" && \
+	export MOZCONFIG="$(PWD)/config/gecko-prof-gonk" && \
+	export EXTRA_INCLUDE='$(EXTRA_INCLUDE)' && \
 	ulimit -n 4096 && \
 	$(MAKE) -C $(GECKO_PATH) -f client.mk -s $(MAKE_FLAGS) && \
 	$(MAKE) -C $(GECKO_OBJDIR) package
@@ -260,7 +261,7 @@ $(APNS_CONF): $(VENDOR_DIR)
 	wget -O $(APNS_CONF) https://raw.github.com/CyanogenMod/android_vendor_cyanogen/gingerbread/prebuilt/common/etc/apns-conf.xml
 
 .PHONY: config-galaxy-s2
-config-galaxy-s2: config-gecko adb-check-version $(APNS_CONF)
+config-galaxy-s2: adb-check-version $(APNS_CONF)
 	@echo "KERNEL = galaxy-s2" > .config.mk && \
         echo "KERNEL_PATH = ./boot/kernel-android-galaxy-s2" >> .config.mk && \
 	echo "GONK = galaxys2" >> .config.mk && \
@@ -280,7 +281,7 @@ config-galaxy-s2: config-gecko adb-check-version $(APNS_CONF)
 	touch $@
 
 .PHONY: config-maguro
-config-maguro: .patches.applied config-gecko adb-check-version $(APNS_CONF)
+config-maguro: .patches.applied adb-check-version $(APNS_CONF)
 	@echo "KERNEL = msm" > .config.mk && \
         echo "KERNEL_PATH = ./boot/msm" >> .config.mk && \
 	echo "GONK = maguro" >> .config.mk && \
@@ -291,7 +292,7 @@ config-maguro: .patches.applied config-gecko adb-check-version $(APNS_CONF)
 	echo OK
 
 .PHONY: config-akami
-config-akami: .patches.applied config-gecko adb-check-version $(APNS_CONF)
+config-akami: .patches.applied adb-check-version $(APNS_CONF)
 	@echo "KERNEL = msm" > .config.mk && \
         echo "KERNEL_PATH = ./boot/msm" >> .config.mk && \
 	echo "GONK = akami" >> .config.mk && \
@@ -299,10 +300,6 @@ config-akami: .patches.applied config-gecko adb-check-version $(APNS_CONF)
 	echo Extracting binary blobs from device, which should be plugged in! ... && \
 	./extract-files.sh && \
 	echo OK
-
-.PHONY: config-gecko
-config-gecko:
-	@ln -sf $(PWD)/config/gecko-prof-gonk $(GECKO_PATH)/mozconfig
 
 define INSTALL_BLOBS
 	mkdir -p download-$1 && \
@@ -314,7 +311,10 @@ define INSTALL_BLOBS
 	done && \
 	for BLOB_SH in extract-*.sh ; do \
 	  BLOB_SH_PATH="$$PWD/$$BLOB_SH" && \
-	  ( cd $3 && $$BLOB_SH_PATH ) ; \
+	  VENDOR=`echo $$BLOB_SH | sed -e "s/extract-\([a-zA-Z]*\).*$$/\1/"` && \
+	  if [ ! -e $3/vendor/$$VENDOR ]; then \
+	    ( cd $3 && $$BLOB_SH_PATH ) ; \
+	  fi ; \
 	done
 endef
 
@@ -353,7 +353,7 @@ blobs-nexuss-ics:
 	$(call INSTALL_BLOBS,nexuss-ics,$(NEXUSS_ICS_BLOBS),$(abspath glue/gonk-ics))
 
 .PHONY: config-nexuss4g
-config-nexuss4g: blobs-nexuss4g config-gecko $(APNS_CONF)
+config-nexuss4g: blobs-nexuss4g $(APNS_CONF)
 	@echo "KERNEL = samsung" > .config.mk && \
         echo "KERNEL_PATH = ./boot/kernel-android-samsung" >> .config.mk && \
 	echo "GONK = crespo4g" >> .config.mk && \
@@ -361,7 +361,7 @@ config-nexuss4g: blobs-nexuss4g config-gecko $(APNS_CONF)
 	echo OK
 
 .PHONY: config-nexuss
-config-nexuss: blobs-nexuss config-gecko $(APNS_CONF)
+config-nexuss: blobs-nexuss $(APNS_CONF)
 	@echo "KERNEL = samsung" > .config.mk && \
         echo "KERNEL_PATH = ./boot/kernel-android-samsung" >> .config.mk && \
 	echo "GONK = crespo" >> .config.mk && \
@@ -369,15 +369,17 @@ config-nexuss: blobs-nexuss config-gecko $(APNS_CONF)
 	echo OK
 
 .PHONY: config-nexuss-ics
-config-nexuss-ics: blobs-nexuss-ics gonk-ics-sync config-gecko
+config-nexuss-ics: blobs-nexuss-ics gonk-ics-sync
 	@echo "KERNEL = samsung" > .config.mk && \
         echo "KERNEL_PATH = ./boot/kernel-android-samsung" >> .config.mk && \
 	echo "GONK = crespo" >> .config.mk && \
 	echo "GONK_BASE = glue/gonk-ics" >> .config.mk && \
+	echo "TOOLCHAIN_PATH = ./toolchains/arm-linux-androideabi-4.6.3/linux-x86/bin/arm-linux-androideabi-" >> .config.mk && \
+	echo "EXTRA_INCLUDE = -include $(abspath Unicode.h)" >> .config.mk && \
 	echo OK
 
 .PHONY: config-qemu
-config-qemu: config-gecko
+config-qemu:
 	@echo "KERNEL = qemu" > .config.mk && \
         echo "KERNEL_PATH = ./boot/kernel-android-qemu" >> .config.mk && \
 	echo "GONK = generic" >> .config.mk && \
@@ -469,13 +471,14 @@ kernel-%:
 OUT_DIR := $(GONK_PATH)/out/target/product/$(GONK)/system
 DATA_OUT_DIR := $(GONK_PATH)/out/target/product/$(GONK)/data
 APP_OUT_DIR := $(OUT_DIR)/app
+GECKO_OUT_DIR := $(OUT_DIR)/b2g
 
 $(APP_OUT_DIR):
 	mkdir -p $(APP_OUT_DIR)
 
 .PHONY: gecko-install-hack
 gecko-install-hack: gecko
-	rm -rf $(OUT_DIR)/b2g
+	rm -rf $(GECKO_OUT_DIR)
 	mkdir -p $(OUT_DIR)/lib
 	# Extract the newest tarball in the gecko objdir.
 	( cd $(OUT_DIR) && \
@@ -489,19 +492,19 @@ gaia-hack: gaia
 	mkdir -p $(OUT_DIR)/home
 	mkdir -p $(DATA_OUT_DIR)/local
 	cp -r $(GAIA_PATH)/* $(DATA_OUT_DIR)/local
-	rm -rf $(OUT_DIR)/b2g/defaults/profile
-	mkdir -p $(OUT_DIR)/b2g/defaults
-	cp -r $(GAIA_PATH)/profile $(OUT_DIR)/b2g/defaults
+	rm -rf $(GECKO_OUT_DIR)/defaults/profile
+	mkdir -p $(GECKO_OUT_DIR)/defaults
+	cp -r $(GAIA_PATH)/profile $(GECKO_OUT_DIR)/defaults
 
 .PHONY: install-gecko
 install-gecko: gecko-install-hack adb-check-version
 	$(ADB) remount
-	$(ADB) push $(OUT_DIR)/b2g /system/b2g
+	$(ADB) push $(GECKO_OUT_DIR) /system/b2g
 
 .PHONY: install-gecko-only
 install-gecko-only:
 	$(ADB) remount
-	$(ADB) push $(OUT_DIR)/b2g /system/b2g
+	$(ADB) push $(GECKO_OUT_DIR) /system/b2g
 
 # The sad hacks keep piling up...  We can't set this up to be
 # installed as part of the data partition because we can't flash that
@@ -553,6 +556,15 @@ package:
 	cp -R $(GONK_PATH)/out/target/product/generic $(PKG_DIR)/qemu
 	cp -R $(GAIA_PATH)/tests $(PKG_DIR)/gaia
 	cd $(PKG_DIR) && tar -czvf qemu_package.tar.gz qemu gaia
+
+UPDATE_PACKAGE_TARGET ?= b2g-gecko-update.mar
+MAR ?= $(GECKO_OBJDIR)/dist/host/bin/mar
+MAKE_FULL_UPDATE ?= $(GECKO_PATH)/tools/update-packaging/make_full_update.sh
+.PHONY: gecko-full-update
+gecko-update-full: gecko
+	MAR=$(MAR) $(MAKE_FULL_UPDATE) $(UPDATE_PACKAGE_TARGET) $(GECKO_OUT_DIR)
+	sha512sum $(UPDATE_PACKAGE_TARGET)
+	ls -l $(UPDATE_PACKAGE_TARGET)
 
 #
 # Package up everything needed to build mozilla-central with
@@ -627,7 +639,7 @@ test:
 
 GDB_PORT=22576
 GDBINIT=/tmp/b2g.gdbinit.$(shell whoami)
-GDB=$(abspath $(GONK_BASE)/prebuilt/linux-x86/tegra-gdb/arm-eabi-gdb)
+GDB=$(abspath toolchains/arm-linux-androideabi-4.6.3/linux-x86/bin/arm-linux-androideabi-gdb)
 B2G_BIN=/system/b2g/b2g
 
 .PHONY: forward-gdb-port
@@ -666,7 +678,7 @@ restore-auto-restart: adb-check-version
 
 .PHONY: run-gdb-server
 run-gdb-server: adb-check-version forward-gdb-port kill-gdb-server disable-auto-restart
-	$(ADB) shell gdbserver :$(GDB_PORT) $(B2G_BIN).d &
+	$(ADB) shell LD_LIBRARY_PATH=/system/b2g gdbserver :$(GDB_PORT) $(B2G_BIN).d &
 	sleep 1
 
 .PHONY: run-gdb
