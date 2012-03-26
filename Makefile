@@ -16,7 +16,8 @@ GONK_BASE ?= glue/gonk
 FASTBOOT ?= $(abspath $(GONK_BASE)/out/host/linux-x86/bin/fastboot)
 HEIMDALL ?= heimdall
 TOOLCHAIN_HOST = linux-x86
-TOOLCHAIN_PATH ?= $(GONK_BASE)/prebuilt/$(TOOLCHAIN_HOST)/toolchain/arm-eabi-4.4.3/bin
+TOOLCHAIN_PATH ?= $(GONK_BASE)/prebuilt/$(TOOLCHAIN_HOST)/toolchain/arm-eabi-4.4.3/bin/arm-eabi-
+KERNEL_TOOLCHAIN_PATH ?= $(GONK_BASE)/prebuilt/$(TOOLCHAIN_HOST)/toolchain/arm-eabi-4.4.3/bin
 
 GAIA_PATH ?= $(abspath gaia)
 GECKO_PATH ?= $(abspath gecko)
@@ -199,7 +200,7 @@ gecko:
 	)
 
 .PHONY: gonk
-gonk: gaia-hack
+gonk: gaia
 	@$(call DEP_CHECK,$(GONK_PATH)/out/.b2g-build-done,$(GONK_BASE), \
 	    $(call GONK_CMD,$(MAKE) $(MAKE_FLAGS) $(GONK_MAKE_FLAGS)) ; \
 	    $(if $(filter qemu,$(KERNEL)), \
@@ -215,13 +216,13 @@ kernel:
 		(rm -rf boot/initramfs && \
 		    cd boot/clockworkmod_galaxys2_initramfs && \
 		    $(GIT) checkout-index -a -f --prefix ../initramfs/); \
-		PATH="$$PATH:$(abspath $(TOOLCHAIN_PATH))" \
+		PATH="$$PATH:$(abspath $(KERNEL_TOOLCHAIN_PATH))" \
 		    $(MAKE) -C $(KERNEL_PATH) $(MAKE_FLAGS) ARCH=arm \
 		    CROSS_COMPILE="$(CCACHE) arm-eabi-"; \
 		find "$(KERNEL_DIR)" -name "*.ko" | \
 		    xargs -I MOD cp MOD "$(PWD)/boot/initramfs/lib/modules"; \
 	    ) \
-	    PATH="$$PATH:$(abspath $(TOOLCHAIN_PATH))" \
+	    PATH="$$PATH:$(abspath $(KERNEL_TOOLCHAIN_PATH))" \
 		$(MAKE) -C $(KERNEL_PATH) $(MAKE_FLAGS) ARCH=arm \
 		CROSS_COMPILE="$(CCACHE) arm-eabi-"; )
 
@@ -310,11 +311,11 @@ define INSTALL_BLOBS
 	  tar xvfz $$BLOB ; \
 	done && \
 	for BLOB_SH in extract-*.sh ; do \
+		PATH=$(FAKE_JDK_PATH):$$PATH && \
 	  BLOB_SH_PATH="$$PWD/$$BLOB_SH" && \
 	  VENDOR=`echo $$BLOB_SH | sed -e "s/extract-\([a-zA-Z]*\).*$$/\1/"` && \
-	  if [ ! -e $3/vendor/$$VENDOR ]; then \
-	    ( cd $3 && $$BLOB_SH_PATH ) ; \
-	  fi ; \
+		( cd $3 && \
+		yes I ACCEPT | $$BLOB_SH_PATH ) ;\
 	done
 endef
 
@@ -374,7 +375,7 @@ config-nexuss-ics: blobs-nexuss-ics gonk-ics-sync
         echo "KERNEL_PATH = ./boot/kernel-android-samsung" >> .config.mk && \
 	echo "GONK = crespo" >> .config.mk && \
 	echo "GONK_BASE = glue/gonk-ics" >> .config.mk && \
-	echo "TOOLCHAIN_PATH = ./toolchains/arm-linux-androideabi-4.6.3/linux-x86/bin/arm-linux-androideabi-" >> .config.mk && \
+	echo "TOOLCHAIN_PATH = ./toolchains/arm-linux-androideabi-4.4.x/bin/arm-linux-androideabi-" >> .config.mk && \
 	echo "EXTRA_INCLUDE = -include $(abspath Unicode.h)" >> .config.mk && \
 	echo OK
 
@@ -400,7 +401,7 @@ flash: update-time flash-$(GONK)
 # depend on building the image.
 
 .PHONY: flash-only
-flash-only: update-time flash-only-$(GONK)
+flash-only: flash-only-$(GONK) update-time
 
 .PHONY: flash-crespo
 flash-crespo: flash-crespo4g
@@ -409,12 +410,10 @@ flash-crespo: flash-crespo4g
 flash-only-crespo: flash-only-crespo4g
 
 .PHONY: flash-crespo4g
-flash-crespo4g: image adb-check-version
-	@$(call GONK_CMD,$(ADB) reboot bootloader && fastboot flashall -w)
+flash-crespo4g: image adb-check-version flash-only-fastboot
 
 .PHONY: flash-only-crespo4g
-flash-only-crespo4g: adb-check-version
-	@$(call GONK_CMD,$(ADB) reboot bootloader && fastboot flashall -w)
+flash-only-crespo4g: adb-check-version flash-only-fastboot
 
 define FLASH_GALAXYS2_CMD
 $(ADB) reboot download 
@@ -435,19 +434,21 @@ flash-only-galaxys2: adb-check-version
 flash-maguro: image flash-only-maguro
 
 .PHONY: flash-only-maguro
-flash-only-maguro: flash-only-toro
+flash-only-maguro: flash-only-fastboot
 
 .PHONY: flash-akami
 flash-akami: image flash-only-akami
 
 .PHONY: flash-only-akami
-flash-only-akami: flash-only-toro
+flash-only-akami: flash-only-fastboot
 
-.PHONY: flash-only-toro
-flash-only-toro:
+# Flash devices that use the fastboot protocol.
+.PHONY: flash-only-fastboot
+flash-only-fastboot:
 	@$(call GONK_CMD, \
 	$(ADB) reboot bootloader && \
 	$(FASTBOOT) devices && \
+	$(FASTBOOT) erase cache && \
 	$(FASTBOOT) erase userdata && \
 	$(FASTBOOT) flash userdata ./out/target/product/$(GONK)/userdata.img && \
 	$(FASTBOOT) flashall)
@@ -486,15 +487,12 @@ gecko-install-hack: gecko
 	find $(GONK_PATH)/out -name "system.img" | xargs rm -f
 	@$(call GONK_CMD,$(MAKE) $(MAKE_FLAGS) $(GONK_MAKE_FLAGS) systemimage-nodeps)
 
-.PHONY: gaia-hack
-gaia-hack: gaia
-	rm -rf $(OUT_DIR)/home
-	mkdir -p $(OUT_DIR)/home
+.PHONY: gaia
+gaia:
+	$(MAKE) -C $(GAIA_PATH) gaia
+	rm -rf $(DATA_OUT_DIR)/local
 	mkdir -p $(DATA_OUT_DIR)/local
-	cp -r $(GAIA_PATH)/* $(DATA_OUT_DIR)/local
-	rm -rf $(GECKO_OUT_DIR)/defaults/profile
-	mkdir -p $(GECKO_OUT_DIR)/defaults
-	cp -r $(GAIA_PATH)/profile $(GECKO_OUT_DIR)/defaults
+	cp -r $(GAIA_PATH)/profile/* $(DATA_OUT_DIR)/local
 
 .PHONY: install-gecko
 install-gecko: gecko-install-hack adb-check-version
@@ -509,18 +507,9 @@ install-gecko-only:
 # The sad hacks keep piling up...  We can't set this up to be
 # installed as part of the data partition because we can't flash that
 # on the sgs2.
-PROFILE := $$($(ADB) shell ls -d /data/b2g/mozilla/*.default | tr -d '\r')
-PROFILE_DATA := $(GAIA_PATH)/profile
 .PHONY: install-gaia
 install-gaia: adb-check-version
-	@for file in $$(ls $(PROFILE_DATA)); \
-	do \
-		data=$${file##*/}; \
-		echo Copying $$data; \
-		$(ADB) shell rm -r $(PROFILE)/$$data; \
-		$(ADB) push $(GAIA_PATH)/profile/$$data $(PROFILE)/$$data; \
-	done
-	@for i in $$(ls $(GAIA_PATH)); do $(ADB) push $(GAIA_PATH)/$$i /data/local/$$i; done
+	$(MAKE) -C $(GAIA_PATH) install-gaia
 
 .PHONY: image
 image: build
