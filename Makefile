@@ -202,7 +202,7 @@ gecko:
 .PHONY: gonk
 gonk:
 	@$(call DEP_CHECK,$(GONK_PATH)/out/.b2g-build-done,$(GONK_BASE), \
-	    $(call GONK_CMD,$(MAKE) $(MAKE_FLAGS) $(GONK_MAKE_FLAGS)) ; \
+	    $(call GONK_CMD,$(MAKE) $(MAKE_FLAGS) $(GONK_MAKE_FLAGS) CONFIG_ESD=no ) ; \
 	    $(if $(filter qemu,$(KERNEL)), \
 		cp $(GONK_PATH)/system/core/rootdir/init.rc.gonk \
 		    $(GONK_PATH)/out/target/product/$(GONK)/root/init.rc))
@@ -481,6 +481,12 @@ gecko-install-hack: gecko
 	# Extract the newest tarball in the gecko objdir.
 	( cd $(OUT_DIR) && \
 	  tar xvfz $$(ls -t $(GECKO_OBJDIR)/dist/b2g-*.tar.gz | head -n1) )
+ifneq ($(GONK_BASE),glue/gonk)
+	( cd $(OUT_DIR) && \
+	  mv b2g/b2g b2g/updater bin && \
+	  ln -s ../bin/b2g b2g/b2g && \
+	  ln -s ../bin/updater b2g/updater )
+endif
 	find $(GONK_PATH)/out -name "system.img" | xargs rm -f
 	@$(call GONK_CMD,$(MAKE) $(MAKE_FLAGS) $(GONK_MAKE_FLAGS) systemimage-nodeps)
 
@@ -646,7 +652,7 @@ SYMDIR=$(GONK_OBJDIR)/symbols
 gdb-init-file:
 	echo "set solib-absolute-prefix $(SYMDIR)" > $(GDBINIT)
 	echo "set solib-search-path $(GECKO_OBJDIR)/dist/bin:$(GECKO_OBJDIR)/dist/lib:$(SYMDIR)/system/lib:$(SYMDIR)/system/lib/hw:$(SYMDIR)/system/lib/egl:$(and $(ANDROIDFS_DIR),$(ANDROIDFS_DIR)/symbols/system/lib:$(ANDROIDFS_DIR)/symbols/system/lib/hw:$(ANDROIDFS_DIR)/symbols/system/lib/egl)" >> $(GDBINIT)
-	echo "target remote :$(GDB_PORT)" >> $(GDBINIT)
+	echo "target extended-remote :$(GDB_PORT)" >> $(GDBINIT)
 
 .PHONY: attach-gdb
 attach-gdb: attach-gdb-server gdb-init-file
@@ -654,17 +660,15 @@ attach-gdb: attach-gdb-server gdb-init-file
 
 .PHONY: disable-auto-restart
 disable-auto-restart: adb-check-version kill-b2g
-	$(ADB) remount
-	$(ADB) shell mv $(B2G_BIN) $(B2G_BIN).d
+	$(ADB) shell stop b2g
 
 .PHONY: restore-auto-restart
 restore-auto-restart: adb-check-version
-	$(ADB) remount
-	$(ADB) shell mv $(B2G_BIN).d $(B2G_BIN)
+	$(ADB) shell start b2g
 
 .PHONY: run-gdb-server
 run-gdb-server: adb-check-version forward-gdb-port kill-gdb-server disable-auto-restart
-	$(ADB) shell LD_LIBRARY_PATH=/system/b2g gdbserver :$(GDB_PORT) $(B2G_BIN).d &
+	$(ADB) shell LD_LIBRARY_PATH=/system/b2g gdbserver --multi :$(GDB_PORT) $(B2G_BIN) &
 	sleep 1
 
 .PHONY: run-gdb
