@@ -55,7 +55,8 @@ FAKE_JDK_PATH ?= $(abspath fake-jdk-tools)
 
 define GONK_CMD # $(call GONK_CMD,cmd)
 	export USE_CCACHE="yes" && \
-	export PATH=$(FAKE_JDK_PATH):$$PATH && \
+	export JAVA_HOME=$(FAKE_JDK_PATH) && \
+	export PATH=$(FAKE_JDK_PATH)/bin:$$PATH && \
 	cd $(GONK_PATH) && \
 	. build/envsetup.sh && \
 	lunch $(GONK_TARGET) && \
@@ -386,6 +387,18 @@ config-qemu:
 	$(MAKE) -C boot/kernel-android-qemu ARCH=arm goldfish_armv7_defconfig && \
 	( [ -e $(GONK_PATH)/device/qemu ] || \
 		mkdir $(GONK_PATH)/device/qemu ) && \
+	echo OK
+
+.PHONY: config-qemu-ics
+config-qemu-ics: gonk-ics-sync
+	@echo "KERNEL = qemu-ics" > .config.mk && \
+        echo "KERNEL_PATH = ./boot/kernel-android-qemu" >> .config.mk && \
+	echo "GONK = generic" >> .config.mk && \
+	echo "GONK_BASE = glue/gonk-ics" >> .config.mk && \
+	echo "TOOLCHAIN_PATH = ./toolchains/arm-linux-androideabi-4.4.x/bin/arm-linux-androideabi-" >> .config.mk && \
+	echo "EXTRA_INCLUDE = -include $(abspath Unicode.h)" >> .config.mk && \
+	echo "GONK_TARGET = generic-eng" >> .config.mk && \
+	echo "GONK_MAKE_FLAGS = TARGET_ARCH_VARIANT=armv7-a" >> .config.mk && \
 	echo OK
 
 .PHONY: flash
