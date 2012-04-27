@@ -182,10 +182,10 @@ endif
 
 KERNEL_DIR = boot/kernel-android-$(KERNEL)
 ifeq (glue/gonk,$(GONK_BASE))
-GECKO_OBJDIR = $(GECKO_PATH)/objdir-prof-gonk
+GECKO_OBJDIR ?= $(GECKO_PATH)/objdir-prof-gonk
 MOZCONFIG = $(abspath config/gecko-prof-gonk)
 else
-GECKO_OBJDIR = objdir-gecko
+GECKO_OBJDIR ?= $(abspath objdir-gecko)
 MOZCONFIG = $(abspath glue/gonk-ics/gonk-misc/default-gecko-config)
 endif
 
@@ -199,7 +199,7 @@ define GECKO_BUILD_CMD
 	export TARGET_TOOLS_PREFIX="$(abspath $(TOOLCHAIN_PATH))" && \
 	export MOZCONFIG="$(MOZCONFIG)" && \
 	export EXTRA_INCLUDE='$(EXTRA_INCLUDE)' && \
-	export GECKO_OBJDIR="$(abspath objdir-gecko)" && \
+	export GECKO_OBJDIR="$(GECKO_OBJDIR)" && \
 	ulimit -n 4096 && \
 	$(MAKE) -C $(GECKO_PATH) -f client.mk -s $(MAKE_FLAGS) && \
 	$(MAKE) -C $(GECKO_OBJDIR) package
@@ -218,8 +218,8 @@ gonk:
 	@$(call DEP_CHECK,$(GONK_PATH)/out/.b2g-build-done,$(GONK_BASE), \
 	    $(call GONK_CMD,$(MAKE) $(MAKE_FLAGS) $(GONK_MAKE_FLAGS) \
 	           CONFIG_ESD=no \
-	           GECKO_PATH="$(abspath gecko)" \
-	           GECKO_OBJDIR="$(abspath objdir-gecko)" ) ; \
+	           GECKO_PATH=$(GECKO_PATH) \
+	           GECKO_OBJDIR=$(GECKO_OBJDIR) ) ;\
 	    $(if $(filter qemu,$(KERNEL)), \
 		cp $(GONK_PATH)/system/core/rootdir/init.rc.gonk \
 		    $(GONK_PATH)/out/target/product/$(GONK)/root/init.rc))
@@ -252,12 +252,12 @@ kernel-galaxy-s2-ics:
 	export CROSS_COMPILE="$(CCACHE) $(abspath $(KERNEL_TOOLCHAIN_PATH))/arm-eabi-" && \
 	export USE_SEC_FIPS_MODE=true && \
 	$(MAKE) -C $(KERNEL_PATH) $(MAKE_FLAGS) u1_defconfig && \
-	$(MAKE) -C $(KERNEL_PATH) $(MAKE_FLAGS) CROSS_COMPILE="$$CROSS_COMPILE" CONFIG_INITRAMFS_SOURCE="$(PWD)/boot/initramfs" && \
+	$(MAKE) -C $(KERNEL_PATH) $(MAKE_FLAGS) CROSS_COMPILE="$$CROSS_COMPILE" CONFIG_INITRAMFS_SOURCE="$(PWD)/boot/initramfs" CONFIG_INITRAMFS_ROOT_UID=squash CONFIG_INITRAMFS_ROOT_GID=squash && \
 	mkdir -p boot/initramfs/lib/modules && \
 	find "$(KERNEL_DIR)" -name dhd.ko -o -name j4fs.ko -o -name scsi_wait_scan.ko -o -name Si4709_driver.ko | \
 	    xargs -I MOD cp MOD "$(PWD)/boot/initramfs/lib/modules" && \
 	chmod -R g-w $(PWD)/boot/initramfs && \
-	$(MAKE) -C $(KERNEL_PATH) $(MAKE_FLAGS) CROSS_COMPILE="$$CROSS_COMPILE" CONFIG_INITRAMFS_SOURCE="$(PWD)/boot/initramfs"
+	$(MAKE) -C $(KERNEL_PATH) $(MAKE_FLAGS) CROSS_COMPILE="$$CROSS_COMPILE" CONFIG_INITRAMFS_SOURCE="$(PWD)/boot/initramfs" CONFIG_INITRAMFS_ROOT_UID=squash CONFIG_INITRAMFS_ROOT_GID=squash
 
 kernel-qemu:
 	PATH="$$PATH:$(abspath $(KERNEL_TOOLCHAIN_PATH))" \
@@ -626,6 +626,7 @@ TOOLCHAIN_TARGET ?= linux-x86
 TOOLCHAIN_DIRS = \
 	bionic \
 	external/stlport/stlport \
+	external/dbus \
 	frameworks/base/include \
 	frameworks/base/native/include \
 	frameworks/base/opengl/include \
@@ -640,8 +641,9 @@ TOOLCHAIN_DIRS = \
 	prebuilt/$(TOOLCHAIN_TARGET)/toolchain/arm-eabi-4.4.3 \
 	system/core/include
 
-# Toolchain versions are numbered consecutively.
-TOOLCHAIN_VERSION := 0
+# Toolchain versions are numbered consecutively. Toolchain version
+# should be bumped whenever a new toolchain is generated
+TOOLCHAIN_VERSION := 1
 TOOLCHAIN_PKG_DIR := gonk-toolchain-$(TOOLCHAIN_VERSION)
 .PHONY: package-toolchain
 package-toolchain: gonk
